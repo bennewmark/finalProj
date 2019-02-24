@@ -23,7 +23,7 @@ var vc = vec4(-0.816497, -0.471405, 0.333333, 1);
 var vd = vec4(0.816497, -0.471405, 0.333333, 1);
 
 var lightPosition = vec4(1.0, 1.0, 1.0, 0.0);
-var lightAmbient = vec4(0.0, 0.2, 0.2, 1.0);
+var lightAmbient = vec4(0.4, 0.4, 0.4, 1.0);
 var lightDiffuse = vec4(0.3, 0.3, 0.3, 1.0);
 var lightSpecular = vec4(1.0, 0.3, 1.0, 1.0);
 
@@ -47,6 +47,7 @@ var stack = [];
 var origins = [];
 var aColor = [];
 
+
 window.onload = function init() {
 
     canvas = document.getElementById("gl-canvas");
@@ -59,6 +60,7 @@ window.onload = function init() {
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(1.0, 1.0, 1.0, 1.0);
 
+    gl.enable(gl.CULL_FACE);
     gl.enable(gl.DEPTH_TEST);
 
     //
@@ -89,6 +91,7 @@ window.onload = function init() {
     var vPosition = gl.getAttribLocation(program, "vPosition");
     gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vPosition);
+
 
     modelViewMatrixLoc = gl.getUniformLocation(program, "modelViewMatrix");
     projectionMatrixLoc = gl.getUniformLocation(program, "projectionMatrix");
@@ -121,6 +124,8 @@ let theta = 0;
 let mDir = 1;
 let distance = 8;
 let mvMatrix;
+let mode = 'g';
+let sAngle = 0;
 
 function render() {
 
@@ -156,6 +161,27 @@ function render() {
     }
 
     theta += 1;
+
+    window.onkeypress = function (event) {
+        var key = event.key;
+        switch (key) {
+            case 'p': //Increase spotlight cut off angle (increase cone angle)
+                mode += 2;
+                break;
+            case 'P': // Decrease spotlight cut off angle (decrease cone angle)
+            case 'i':
+                mode -= 2;
+                break;
+            case 'm': // The scene is shaded using Gouraud lighting (smooth shading)
+                mode = 'g';
+                break;
+            case 'M': // The scene is shaded using flat shading
+            case 'n':
+                mode = 'f';
+                break;
+        }
+    };
+
 
     var delayInMilliseconds = 0; //1 second
     id = requestAnimationFrame(render);
@@ -194,8 +220,8 @@ function doEverything() {
         mvMatrix = mult(translate(0, 0, -distance), mvMatrix); //move because that's the camera
         mvMatrix = setScale(0.65); //smaller than before
         gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-        draw(aSphere, aColor[1], 12 * Math.pow(4, numTimesToSubdivide));
         drawLine(2.5);
+        draw(aSphere, aColor[1], 12 * Math.pow(4, numTimesToSubdivide));
         mvMatrix = setScale(1 / 0.65); //smaller than before
 
         mvMatrix = mult(translate(0, -.75, 0), mvMatrix);
@@ -469,7 +495,16 @@ function draw(objectArr, color, count) {
 
     var vBuffer2 = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer2);
-    gl.bufferData(gl.ARRAY_BUFFER, flatten(objNorm), gl.STATIC_DRAW);
+
+    if (mode === 'f') {
+        let holder = new Array(objNorm.length);
+        for (let j = 0; j < holder.length; j++) {
+            holder[j] = objNorm[0];
+        }
+        gl.bufferData(gl.ARRAY_BUFFER, flatten(holder), gl.STATIC_DRAW);
+    } else
+        gl.bufferData(gl.ARRAY_BUFFER, flatten(objNorm), gl.STATIC_DRAW);
+
 
     var vNormal = gl.getAttribLocation(program, "vNormal");
     gl.vertexAttribPointer(vNormal, 4, gl.FLOAT, false, 0, 0);
