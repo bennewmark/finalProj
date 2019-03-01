@@ -100,7 +100,7 @@ var yellow = new Uint8Array([255, 255, 0, 255]);
 let images = [];
 
 let refraDegree = 0.54;
-
+let light;
 
 //on loadup, do all of the one-time setups: gathering variable locations, one-time calculations for global variables, etc
 window.onload = function init() {
@@ -192,17 +192,11 @@ window.onload = function init() {
         "reflects"), reflectionsOn);
 
 
-
-    let light = vec3(0.0, 0.0, 2.0);
-
+    light = vec3(-lightPosition[0], lightPosition[1], lightPosition[2]);
     m = mat4();
-    m[3][3] = 0;
-    m[3][2] = -1 / light[2];
+    // m[3][3] = 0;
+    m[3][2] = -1 / lightPosition[2];
     fColor = gl.getUniformLocation(program, "fColor");
-
-
-
-
 
 
     loadImages([
@@ -293,14 +287,12 @@ function render() {
     if (texturebackOn)
         gl.enableVertexAttribArray(vTexCoord);
     //draw walls and floor using texture stuff
-    gl.uniform1f(gl.getUniformLocation(program,
-        "isBackground"), 1.0);
+    gl.uniform1f(gl.getUniformLocation(program, "isBackground"), 1.0);
     drawBackground();
 
     gl.disableVertexAttribArray(vTexCoord);
     //draw all the objects, possibly cubemapped
-    gl.uniform1f(gl.getUniformLocation(program,
-        "isBackground"), 0.0);
+    gl.uniform1f(gl.getUniformLocation(program, "isBackground"), 0.0);
     drawObjects();
 
     theta += tRate;
@@ -375,13 +367,13 @@ function render() {
             case 'T':
                 paused = Math.abs(paused - 1);
                 if (paused === 0)
-                  requestAnimationFrame(render);
+                    requestAnimationFrame(render);
                 break;
         }
     };
 
     delayInMilliseconds = 0;
-    if (paused === 0){
+    if (paused === 0) {
         setTimeout(function () {
             requestAnimationFrame(render);
         }, delayInMilliseconds);
@@ -624,7 +616,7 @@ function draw(objectArr, color, count, image = 'n') {
     gl.uniform1f(gl.getUniformLocation(program,
         "textNum"), 0.5);
     gl.uniform1f(gl.getUniformLocation(program,
-        "reflects"), reflectionsOn);
+        "reflects"), Math.max(reflectionsOn, refractionsOn));
 
     if ((image !== 'n') && (texturebackOn === 1)) {
         // set which texture units to render with.
@@ -644,26 +636,47 @@ function draw(objectArr, color, count, image = 'n') {
             gl.uniform1f(gl.getUniformLocation(program,
                 "textNum"), 1.0);
     }
-    if ((image === 'n') && (reflectionsOn === 1)) {
-        //  gl.activeTexture(gl.TEXTURE3);
-        // gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
-
-    }
     for (let i = 0; i < count; i += 3) {
         gl.drawArrays(gl.TRIANGLES, i, 3);
     }
 
     if ((count > 6) && (shadowsOn === 1)) {
-        let light = vec3(lightPosition[0],lightPosition[1],lightPosition[2]);
+        let toOrigMat = translate(light[0], light[1], light[2]);
+        let returnMat = translate(-light[0], -light[1], -light[2]);
+        let M = mult(toOrigMat, m);
+        M = mult(M, returnMat);
+        let T = mat4(1);
+        T[2][3] = -8;
+        //TODO figure out how to calculate T[2][3] - should be distance from z = 0 to the back wall (need to figure out back wall!)
 
-        modelViewMatrix = mult(translate(light[0], light[1], light[2]), modelViewMatrix);
-        modelViewMatrix = mult(modelViewMatrix, m);
-        modelViewMatrix = mult(modelViewMatrix, translate(-light[0], -light[1], -light[2]));
+        let baseShadow = mult(M, mvMatrix);
+        let trueShadow = mult(T, baseShadow);
 
-        gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(modelViewMatrix));
+        /*      //all the testing messages for shadows
+                console.log("to origin:");
+                console.log(toOrigMat);
+                console.log("m:");
+                console.log(m);
+                console.log("return:");
+                console.log(returnMat);
+                console.log("M:");
+                console.log(M);
+                console.log("modelview:");
+                console.log(modelViewMatrix);
+                console.log("M * A:");
+                console.log(baseShadow);
+                console.log("T * M * A:");
+                console.log(trueShadow);
+        */
+
+        gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(trueShadow));
+
+        gl.disableVertexAttribArray(vColor);
+
         gl.uniform4fv(fColor, flatten(vec4(0.0, 0.0, 0.0, 1.0)));
-        for (let i = 0; i < count; i += 3) {
-            gl.drawArrays(gl.TRIANGLES, i, 3);
+
+        for (let j = 0; j < count; j += 3) {
+            gl.drawArrays(gl.TRIANGLES, j, 3);
         }
 
     }
@@ -707,7 +720,7 @@ function drawLine(mod = 1) {
     gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vPosition);
 
-   var cBuffer = gl.createBuffer();
+    var cBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flatten(colors), gl.STATIC_DRAW);
 
@@ -715,7 +728,7 @@ function drawLine(mod = 1) {
     gl.vertexAttribPointer(vColor, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vColor);
 
-   // gl.uniform4fv(fColor, vec4(0.0, 0.0, 0.0, 1.0));
+    // gl.uniform4fv(fColor, vec4(0.0, 0.0, 0.0, 1.0));
     gl.uniform1f(gl.getUniformLocation(program,
         "textNum"), 0.5);
     gl.drawArrays(gl.LINE_STRIP, 0, lines.length);
