@@ -54,7 +54,6 @@ var program;
 var fovy = 45.0;  // Field-of-view in Y direction angle (in degrees)
 var aspect;       // Viewport aspect ratio
 var stack = [];
-var origins = [];
 var aColor = [];
 
 var delayInMilliseconds = 0;
@@ -82,9 +81,6 @@ var texCoord = [
 var vTexCoord;
 var tBuffer;
 
-var wallImg;
-var floorImg;
-let ndx = 0;
 let images = [];
 //on loadup, do all of the one-time setups: gathering variable locations, one-time calculations for global variables, etc
 window.onload = function init() {
@@ -167,25 +163,6 @@ window.onload = function init() {
     gl.vertexAttribPointer(vTexCoord, 2, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vTexCoord);
 
-    createATexture();
-
-
-    var initTexture = function () {
-        wallImg = document.getElementById("stones");
-        var texture = gl.createTexture();
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, wallImg);
-        gl.generateMipmap(gl.TEXTURE_2D);
-
-        floorImg = document.getElementById("grass");
-        texture = gl.createTexture();
-        gl.activeTexture(gl.TEXTURE0 + 1);
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, floorImg);
-        gl.generateMipmap(gl.TEXTURE_2D);
-    };
-
 
     let light = vec3(0.0, 0.0, 2.0);
 
@@ -239,11 +216,6 @@ function texturesSetup() {
     render();
 }
 
-
-function isPowerOf2(value) {
-    return (value & (value - 1)) === 0;
-}
-
 //sphere default dimensions
 var va = vec4(0.0, 0.0, -1.0, 1);
 var vb = vec4(0.0, 0.942809, 0.333333, 1);
@@ -286,12 +258,11 @@ function render() {
 
 
     gl.enableVertexAttribArray(vTexCoord);
-    drawFloors();
-    drawWalls();
-
+    //draw walls and floor using texture stuff
+    drawBackground();
 
     gl.disableVertexAttribArray(vTexCoord);
-    //draw all the objects
+    //draw all the objects, no textures (yet?)
     drawObjects();
 
     theta += tRate;
@@ -427,21 +398,12 @@ function drawObjects() {
 
 }
 
-function drawWalls() {
+function drawBackground() {
+    let walls = quad(0, 1, 2, 3); //wall
+    let floor = quad(0, 4, 1, 5); //floor
+
+    //WALL PART
     if (stack.push(mvMatrix)) {
-        let walls = [
-            quad(4, 6, 0, 2), //right wall
-            quad(0, 1, 2, 3), //back wall
-        ];
-
-        let points = [], norms = [];
-        for (let i = 0; i < 2; i++) {
-            points = points.concat(walls[i][0]);
-            norms.push(walls[i][1]);
-        }
-
-        let all = [points, norms];
-
         mvMatrix = setScale(10);
         //left wall
         if (stack.push(mvMatrix)) {
@@ -449,7 +411,7 @@ function drawWalls() {
             mvMatrix = mult(translate(-6.0, 0.0, -distance - 12), mvMatrix);
             mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
             gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-            draw(walls[1], vec4(0.5, 0.0, 0.0, 1.0), 6, 'w');
+            draw(walls, vec4(0.5, 0.0, 0.0, 1.0), 6, 'w');
         }
         mvMatrix = stack.pop();
         //right wall
@@ -459,16 +421,15 @@ function drawWalls() {
             mvMatrix = mult(translate(6.0, 0.0, -distance - 12), mvMatrix);
             mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
             gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-            draw(walls[1], vec4(0.0, 0.0, 0.5, 1.0), 6, 'w');
+            draw(walls, vec4(0.0, 0.0, 0.5, 1.0), 6, 'w');
         }
         mvMatrix = stack.pop();
-
-        // console.log("done with walls");
+        //  console.log("done with walls");
     }
     mvMatrix = stack.pop();
-}
 
-function drawFloors() {
+
+   //FLOOR PART
     if (stack.push(mvMatrix)) {
         let floor = quad(0, 4, 1, 5); //floor
 
@@ -482,7 +443,6 @@ function drawFloors() {
             draw(floor, vec4(0.0, 1.0, 0.0, 1.0), 6, 'f');
         }
         mvMatrix = stack.pop();
-
         //  console.log("done with floors");
     }
     mvMatrix = stack.pop();
@@ -790,77 +750,6 @@ function triangle(a, b, c) {
 
 }
 
-function createATexture() {
-    //
-    // Initialize a texture
-    //
-
-    var tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-
-    // Fill the texture with a 1x1 blue pixel.
-    //Specify the array of the two-dimensional texture elements
-    //target, level, iformat, format, type, image
-    //target - lets us choose a single image or set up a cube map
-    //level - mipmapping, where 0 denotes the highest resolution or that we are not using mipmapping
-    //iformat - how to store the texture in memory
-    //width
-    //height
-    //border - deprecated, so should always be 0
-    //format and type - how the pixels are stored, so that WebGL knows how to read those pixels in
-    //image - self-explanatory
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-        new Uint8Array([0, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255]));
-
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-}
-
-function configureTexture(image) {
-    //gl.activeTexture(gl.TEXTURE0+1);
-    //Create a texture object
-    texture = gl.createTexture();
-
-    //Bind it as the current two-dimensional texture
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-
-    //Needed to flip the image from top to bottom due to the different
-    //coordinate systems used for the image and by our application
-    //gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-
-    //How do we interpret a value of s or t outside of the range (0.0, 1.0)?
-    //Generally, we want the texture either to repeat or to clamp the values to 0.0 or 1.0
-    //By executing these functions after the gl.bindTexture, the parameters become part of the texture object
-    //Other option for last parameter is gl.REPEAT, but that doesn't work here
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-
-    //Specify the array of the two-dimensional texture elements
-    //target, level, iformat, format, type, image
-    //target - lets us choose a single image or set up a cube map
-    //level - mipmapping, where 0 denotes the highest resolution or that we are not using mipmapping
-    //iformat - how to store the texture in memory
-    //format and type - how the pixels are stored, so that WebGL knows how to read those pixels in
-    //image - self-explanatory
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
-
-    //The size of the pixel that we are trying to color on the screen may be smaller or larger than one pixel
-    //magnification - the texel is larger than one pixel
-    //minification - the texture is smaller than one pixel
-    //NEAREST - use the value of the nearest point sampling
-    //LINEAR - linear filtering
-    //mip-mapping - create a series of texture arrays at reduced sizes; webgl requires row and column
-    //dimensions that are powers of two
-    //gl.NEAREST_MIPMAP_NEAREST
-    //use point sampling with the best mipmap, filtering with the best mipmap, point sampling using linear filtering
-    //between mipmaps, or both (NEAREST_MIPMAP_LINEAR, LINEAR_MIPMAP_NEAREST, LINEAR_MIPMAP_LINEAR)
-    //gl.generateMipmap( gl.TEXTURE_2D );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-    //Link the texture object we create in the application to the sampler in the fragment shader
-    gl.uniform1i(gl.getUniformLocation(program, "texture"), 0);
-}
 
 function loadImage(url, callback) {
     var image = new Image();
