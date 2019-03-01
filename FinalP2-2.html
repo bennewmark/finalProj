@@ -1,5 +1,25 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <style>
+        canvas {
+            padding-left: 0;
+            padding-right: 0;
+            margin-left: auto;
+            margin-right: auto;
+            display: block;
+            width: 800px;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+
+        th, td {
+            padding: 15px;
+        }
+    </style>
+</head>
+
 <title>Final Project Part 2-2</title>
 
 <script id="vertex-shader" type="x-shader/x-vertex">
@@ -28,6 +48,7 @@ varying vec2 fTexCoord;
 uniform vec3 theta;
     attribute float a_textureIndex;
     varying float v_textureIndex;
+varying vec3 refl;
 
 void main()
 {
@@ -49,6 +70,7 @@ void main()
 
     //Calculate reflection vector
     vec3 R = (2.0 * dot(L, N) * N) - L;
+    refl = refract(pos, N, 0.5);
 
     float Kd = dot(L, N);
     float Ks = pow(max(dot(V, R), 0.0), shininess);
@@ -84,6 +106,10 @@ void main()
 
 }
 
+
+
+
+
 </script>
 
 <script id="fragment-shader" type="x-shader/x-fragment">
@@ -97,18 +123,40 @@ uniform sampler2D texture;
 uniform sampler2D wallTexture;
 uniform sampler2D floorTexture;
 
+uniform samplerCube texMap;
+varying vec3 refl;
+
+
 uniform float textNum;
+uniform float isBackground;
+uniform float reflects;
 
 void
 main()
 {
-    if (textNum == 0.0)
-        gl_FragColor = texture2D(wallTexture, fTexCoord);
-    else if (textNum == 1.0)
-        gl_FragColor = texture2D(floorTexture, fTexCoord);
-    else
-        gl_FragColor = fColor;
+    if (isBackground == 1.0){
+        if (textNum == 0.0){
+            gl_FragColor = texture2D(wallTexture, fTexCoord);
+         }
+        else if (textNum == 1.0){
+            gl_FragColor = texture2D(floorTexture, fTexCoord);
+         }
+         else
+            gl_FragColor = fColor;
+    }
+    else {
+        if (reflects == 1.0) {
+            vec4 texColor = textureCube(texMap, refl);
+            gl_FragColor = fColor * texColor;
+        }
+        else
+            gl_FragColor = fColor;
+    }
 }
+
+
+
+
 
 </script>
 
@@ -122,6 +170,36 @@ main()
 <canvas id="gl-canvas" width="900" height="700" style="border: 10px solid black;">
     Epic fail!
 </canvas>
+
+<table id="toggleTable" align="center">
+    <tr>
+        <th>
+            Lighting: <span style="color: dodgerblue; ">Gouraud</span>
+        </th>
+        <th>
+            Shadows: <span style="color: green; ">On</span>
+        </th>
+        <th>
+            Background textures: <span style="color: green; ">On</span>
+        </th>
+        <th>
+            Reflections: <span style="color: red; ">Off</span>
+        </th>
+        <th>
+            Refraction: <span style="color: red; ">Off</span>
+        </th>
+    </tr>
+    <tr>
+        <td>M/n</td>
+        <td>A</td>
+        <td>B</td>
+        <td>C</td>
+        <td>D</td>
+    </tr>
+
+
+</table>
+
 <img id="stones" src="resources/stones.bmp" hidden>
 <img id="grass" src="resources/grass.bmp" hidden>
 </body>

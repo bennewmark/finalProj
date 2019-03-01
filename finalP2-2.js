@@ -81,7 +81,27 @@ var texCoord = [
 var vTexCoord;
 var tBuffer;
 
+let depthMax = 2;
+
+let shadowsOn = 1;
+let texturebackOn = 1;
+let reflectionsOn = 0.0;
+let refractionsOn = 0;
+
+let grayC = vec4(0.4, 0.4, 0.4, 1.0);
+let blueC = vec4(0.1, 0.3, 1.0, 1.0);
+
+var red = new Uint8Array([255, 0, 0, 255]);
+var blue = new Uint8Array([0, 0, 255, 255]);
+var green = new Uint8Array([0, 255, 0, 255]);
+var cyan = new Uint8Array([0, 255, 255, 255]);
+var magenta = new Uint8Array([255, 0, 255, 255]);
+var yellow = new Uint8Array([255, 255, 0, 255]);
 let images = [];
+
+let refraDegree = 0.54;
+
+
 //on loadup, do all of the one-time setups: gathering variable locations, one-time calculations for global variables, etc
 window.onload = function init() {
     canvas = document.getElementById("gl-canvas");
@@ -125,6 +145,8 @@ window.onload = function init() {
         "shininess"), materialShininess);
     gl.uniform1f(gl.getUniformLocation(program,
         "angle"), sAngle);
+    gl.uniform1f(gl.getUniformLocation(program,
+        "isBackground"), 1.0);
 
 
     var vPosition = gl.getAttribLocation(program, "vPosition");
@@ -143,12 +165,14 @@ window.onload = function init() {
         let g = Math.random();
         let b = Math.random();
 
-        while (r + g + b > 1.3) {
+        let tColor = vec4(r, g, b, 1.0);
+        while ((r + g + b > 1.3) || (tColor === grayC) || (tColor === blueC)) {
             r = Math.random();
             g = Math.random();
             b = Math.random();
+            tColor = vec4(r, g, b, 1.0);
         }
-        aColor[i] = vec4(r, g, b, 1.0);
+        aColor[i] = tColor;
     }
 
     //create cubes and spheres, set modifiers for theta
@@ -164,6 +188,11 @@ window.onload = function init() {
     gl.enableVertexAttribArray(vTexCoord);
 
 
+    gl.uniform1f(gl.getUniformLocation(program,
+        "reflects"), reflectionsOn);
+
+
+
     let light = vec3(0.0, 0.0, 2.0);
 
     m = mat4();
@@ -172,13 +201,8 @@ window.onload = function init() {
     fColor = gl.getUniformLocation(program, "fColor");
 
 
-    var textureLoc = gl.getUniformLocation(program, "u_textures[0]");
-// Tell the shader to use texture units 0 to 3
-    gl.uniform1iv(textureLoc, [0, 1, 2, 3]);
 
-    gl.activeTexture(gl.TEXTURE0 + 0);
-    var tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
+
 
 
     loadImages([
@@ -188,8 +212,9 @@ window.onload = function init() {
 
 };
 // lookup the sampler locations.
-var u_image0Location;
-var u_image1Location;
+var wallTextLoc;
+var floorTextLoc;
+var cubemapLoc;
 var textures = [];
 
 function texturesSetup() {
@@ -211,8 +236,16 @@ function texturesSetup() {
         // add the texture to the array of textures.
         textures.push(texture);
     }// lookup the sampler locations.
-    u_image0Location = gl.getUniformLocation(program, "wallTexture");
-    u_image1Location = gl.getUniformLocation(program, "floorTexture");
+    wallTextLoc = gl.getUniformLocation(program, "wallTexture");
+    floorTextLoc = gl.getUniformLocation(program, "floorTexture");
+    cubemapLoc = gl.getUniformLocation(program, "texMap");
+
+
+    configureCubeMap();
+
+    gl.uniform1i(cubemapLoc, 2);  // texture unit 2 (temp)
+    loadCubeMapImages();
+
     render();
 }
 
@@ -228,6 +261,7 @@ let mvMatrix;
 let mode = 'g';
 let rate = 0.01;
 let tRate = 1;
+let paused = 1;
 
 // render: ran once per animation frame, sets up the view matrix before calling drawObjects() to summon all the items
 // also handles keyboard commands
@@ -238,7 +272,6 @@ function render() {
 
     eye = vec3(0, 0, 0);
 
-    //modelViewMatrix = lookAt(vec3(0, 0, -8), at, up);
     modelViewMatrix = lookAt(eye, at, up);
 
 
@@ -257,12 +290,17 @@ function render() {
     gl.uniformMatrix4fv(projectionMatrixLoc, false, flatten(pMatrix));
 
 
-    gl.enableVertexAttribArray(vTexCoord);
+    if (texturebackOn)
+        gl.enableVertexAttribArray(vTexCoord);
     //draw walls and floor using texture stuff
+    gl.uniform1f(gl.getUniformLocation(program,
+        "isBackground"), 1.0);
     drawBackground();
 
     gl.disableVertexAttribArray(vTexCoord);
-    //draw all the objects, no textures (yet?)
+    //draw all the objects, possibly cubemapped
+    gl.uniform1f(gl.getUniformLocation(program,
+        "isBackground"), 0.0);
     drawObjects();
 
     theta += tRate;
@@ -270,6 +308,7 @@ function render() {
 
     window.onkeypress = function (event) {
         var key = event.key;
+        let labels = document.getElementById("toggleTable").rows[0].cells;
         switch (key) {
             case 'p': //Increase spotlight cut off angle (increase cone angle)
                 if ((sAngle + rate) <= 1.0) {
@@ -286,10 +325,12 @@ function render() {
                 break;
             case 'm': // The scene is shaded using Gouraud lighting (smooth shading)
                 mode = 'g';
+                labels[0].innerHTML = "Lighting: <span style=\"color: dodgerblue; \">Gouraud</span>";
                 break;
             case 'M': // The scene is shaded using flat shading
             case 'n':
                 mode = 'f';
+                labels[0].innerHTML = "Lighting: <span style=\"color: saddlebrown; \">Flat</span>";
                 break;
             case 'b':
                 tRate += 0.1;
@@ -298,18 +339,107 @@ function render() {
                 if (tRate >= 0.1)
                     tRate -= 0.1;
                 break;
+            case 'A':
+                shadowsOn = Math.abs(shadowsOn - 1);
+                //console.log("Shadows toggled to " + shadowsOn);
+                if (shadowsOn === 0)
+                    labels[1].innerHTML = "Shadows: <span style=\"color: red; \">Off</span>";
+                else
+                    labels[1].innerHTML = "Shadows: <span style=\"color: green; \">On";
+
+                break;
+            case 'B':
+                texturebackOn = Math.abs(texturebackOn - 1);
+                //console.log("background textures toggled to " + texturebackOn);
+                if (texturebackOn === 0)
+                    labels[2].innerHTML = "Background textures: <span style=\"color: red; \">Off</span>";
+                else
+                    labels[2].innerHTML = "Background textures: <span style=\"color: green; \">On</span>";
+                break;
+            case 'C':
+                reflectionsOn = Math.abs(reflectionsOn - 1.0);
+                //console.log("reflections toggled to " + reflectionsOn);
+                if (reflectionsOn === 0)
+                    labels[3].innerHTML = "Reflections: <span style=\"color: red; \">Off</span>";
+                else
+                    labels[3].innerHTML = "Reflections: <span style=\"color: green; \">On</span>";
+                break;
+            case 'D':
+                refractionsOn = Math.abs(refractionsOn - 1);
+                //console.log("refraction toggled to " + refractionsOn);
+                if (refractionsOn === 0)
+                    labels[4].innerHTML = "Refraction: <span style=\"color: red; \">Off</span>";
+                else
+                    labels[4].innerHTML = "Refraction: <span style=\"color: green; \">On</span>";
+                break;
+            case 'T':
+                paused = Math.abs(paused - 1);
+                if (paused === 0)
+                  requestAnimationFrame(render);
+                break;
         }
     };
 
     delayInMilliseconds = 0;
-    setTimeout(function () {
-        requestAnimationFrame(render);
-    }, delayInMilliseconds);
+    if (paused === 0){
+        setTimeout(function () {
+            requestAnimationFrame(render);
+        }, delayInMilliseconds);
+    }
 }
 
 //set modifiers for theta
 let spot;
 let mod = [0, 0, 2, 8];
+
+function drawBackground() {
+    let walls = quad(0, 1, 2, 3); //wall
+    let floor = quad(0, 4, 1, 5); //floor
+
+    //WALL PART
+    if (stack.push(mvMatrix)) {
+        mvMatrix = setScale(10);
+        //left wall
+        if (stack.push(mvMatrix)) {
+            mvMatrix = mult(rotateY(45), mvMatrix);
+            mvMatrix = mult(translate(-6.0, 0.0, -distance - 12), mvMatrix);
+            mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
+            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
+            draw(walls, blueC, 6, 'w');
+        }
+        mvMatrix = stack.pop();
+        //right wall
+        if (stack.push(mvMatrix)) {
+            mvMatrix = mult(translate(6.0, 0.0, 0.0), mvMatrix);
+            mvMatrix = mult(rotateY(-45), mvMatrix);
+            mvMatrix = mult(translate(6.0, 0.0, -distance - 12), mvMatrix);
+            mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
+            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
+            draw(walls, blueC, 6, 'w');
+        }
+        mvMatrix = stack.pop();
+        //  console.log("done with walls");
+    }
+    mvMatrix = stack.pop();
+
+
+    //FLOOR PART
+    if (stack.push(mvMatrix)) {
+
+        mvMatrix = setScale(13);
+        //floor
+        if (stack.push(mvMatrix)) {
+            mvMatrix = mult(rotateX(1), mvMatrix);
+            mvMatrix = mult(translate(0.0, -14.50, -distance - 12), mvMatrix);
+            mvMatrix = setScale(1.5);
+            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
+            draw(floor, grayC, 6, 'f');
+        }
+        mvMatrix = stack.pop();
+        //  console.log("done with floors");
+    }
+    mvMatrix = stack.pop();
+}
 
 // drawObjects: creates the single top object and its two children before calling drawChildren() to handle everything else
 function drawObjects() {
@@ -398,57 +528,6 @@ function drawObjects() {
 
 }
 
-function drawBackground() {
-    let walls = quad(0, 1, 2, 3); //wall
-    let floor = quad(0, 4, 1, 5); //floor
-
-    //WALL PART
-    if (stack.push(mvMatrix)) {
-        mvMatrix = setScale(10);
-        //left wall
-        if (stack.push(mvMatrix)) {
-            mvMatrix = mult(rotateY(45), mvMatrix);
-            mvMatrix = mult(translate(-6.0, 0.0, -distance - 12), mvMatrix);
-            mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
-            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-            draw(walls, vec4(0.5, 0.0, 0.0, 1.0), 6, 'w');
-        }
-        mvMatrix = stack.pop();
-        //right wall
-        if (stack.push(mvMatrix)) {
-            mvMatrix = mult(translate(6.0, 0.0, 0.0), mvMatrix);
-            mvMatrix = mult(rotateY(-45), mvMatrix);
-            mvMatrix = mult(translate(6.0, 0.0, -distance - 12), mvMatrix);
-            mvMatrix = mult(mvMatrix, scalem(2, 2, 1));
-            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-            draw(walls, vec4(0.0, 0.0, 0.5, 1.0), 6, 'w');
-        }
-        mvMatrix = stack.pop();
-        //  console.log("done with walls");
-    }
-    mvMatrix = stack.pop();
-
-
-   //FLOOR PART
-    if (stack.push(mvMatrix)) {
-        let floor = quad(0, 4, 1, 5); //floor
-
-        mvMatrix = setScale(13);
-        //floor
-        if (stack.push(mvMatrix)) {
-            mvMatrix = mult(rotateX(1), mvMatrix);
-            mvMatrix = mult(translate(0.0, -14.50, -distance - 12), mvMatrix);
-            mvMatrix = setScale(1.5);
-            gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
-            draw(floor, vec4(0.0, 1.0, 0.0, 1.0), 6, 'f');
-        }
-        mvMatrix = stack.pop();
-        //  console.log("done with floors");
-    }
-    mvMatrix = stack.pop();
-}
-
-
 // makeChildren: a recursive function to create a child of whatever called it
 // it starts with the grandchildren of the base, and goes through the depth specified (where the top is depth 0)
 // first calls all "right" children, then recursively each left child to better take advantage of the stack's pushes
@@ -469,6 +548,7 @@ function makeChildren(depth, type) {
 
             gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
             if (type === -1) { //left child will draw the line for its sibling and parent
+                gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
                 drawLine();
                 mvMatrix = setScale(0.65); //smaller than before
                 gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvMatrix));
@@ -480,7 +560,7 @@ function makeChildren(depth, type) {
             }
 
             mvMatrix = mult(translate(0, -0.5, 0), mvMatrix);
-            if (depth < 3) {
+            if (depth < depthMax) {
                 if (stack.push(mvMatrix)) {
                     makeChildren(depth + 1, 1);
                     makeChildren(depth + 1, -1);
@@ -543,10 +623,13 @@ function draw(objectArr, color, count, image = 'n') {
 
     gl.uniform1f(gl.getUniformLocation(program,
         "textNum"), 0.5);
-    if (image !== 'n') {
+    gl.uniform1f(gl.getUniformLocation(program,
+        "reflects"), reflectionsOn);
+
+    if ((image !== 'n') && (texturebackOn === 1)) {
         // set which texture units to render with.
-        gl.uniform1i(u_image0Location, 0);  // texture unit 0
-        gl.uniform1i(u_image1Location, 1);  // texture unit 1
+        gl.uniform1i(wallTextLoc, 0);  // texture unit 0
+        gl.uniform1i(floorTextLoc, 1);  // texture unit 1
 
         // Set each texture unit to use a particular texture.
         gl.activeTexture(gl.TEXTURE0);
@@ -561,19 +644,24 @@ function draw(objectArr, color, count, image = 'n') {
             gl.uniform1f(gl.getUniformLocation(program,
                 "textNum"), 1.0);
     }
+    if ((image === 'n') && (reflectionsOn === 1)) {
+        //  gl.activeTexture(gl.TEXTURE3);
+        // gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
 
+    }
     for (let i = 0; i < count; i += 3) {
         gl.drawArrays(gl.TRIANGLES, i, 3);
     }
 
-    if (count > 6) {
-        let light = vec3(0.0, 0.0, -2.0);
-        modelViewMatrix = mult(modelViewMatrix, translate(light[0], light[1], light[2]));
+    if ((count > 6) && (shadowsOn === 1)) {
+        let light = vec3(lightPosition[0],lightPosition[1],lightPosition[2]);
+
+        modelViewMatrix = mult(translate(light[0], light[1], light[2]), modelViewMatrix);
         modelViewMatrix = mult(modelViewMatrix, m);
         modelViewMatrix = mult(modelViewMatrix, translate(-light[0], -light[1], -light[2]));
 
         gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(modelViewMatrix));
-        //  gl.uniform4fv(fColor, flatten(vec4(0.0, 0.0, 0.0, 1.0)));
+        gl.uniform4fv(fColor, flatten(vec4(0.0, 0.0, 0.0, 1.0)));
         for (let i = 0; i < count; i += 3) {
             gl.drawArrays(gl.TRIANGLES, i, 3);
         }
@@ -603,6 +691,12 @@ function drawLine(mod = 1) {
         vec4(0, 0, 0, 1.0),
         vec4(0, 0, 0, 1.0),
         vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
+        vec4(0, 0, 0, 1.0),
     ];
 
     var pBuffer = gl.createBuffer();
@@ -613,9 +707,15 @@ function drawLine(mod = 1) {
     gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vPosition);
 
-    var cBuffer = gl.createBuffer();
+   var cBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flatten(colors), gl.STATIC_DRAW);
+
+    var vColor = gl.getAttribLocation(program, "vColor");
+    gl.vertexAttribPointer(vColor, 4, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(vColor);
+
+   // gl.uniform4fv(fColor, vec4(0.0, 0.0, 0.0, 1.0));
     gl.uniform1f(gl.getUniformLocation(program,
         "textNum"), 0.5);
     gl.drawArrays(gl.LINE_STRIP, 0, lines.length);
@@ -778,6 +878,113 @@ function loadImages(urls, callback) {
     }
 }
 
+var cubeMap;
+
+function configureCubeMap() {
+    cubeMap = gl.createTexture();
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, red);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blue);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, yellow);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, cyan);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, magenta);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, green);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+
+    gl.uniform1i(gl.getUniformLocation(program, "texMap"), 0);
+
+}
+
+let cubeFaces = [];
+
+function loadCubeMapImages() {
+    cubeFaces = [];
+    let urls = ["posx", "posy", "posz", "negx", "negy", "negz"];
+    var imagesToLoad = urls.length;
+
+    // Called each time an image finished
+    // loading.
+    var onImageLoad = function () {
+        --imagesToLoad;
+        // If all the images are loaded call the callback.
+        if (imagesToLoad === 0) {
+            configureCubeMapImage();
+        }
+    };
+
+    for (var ii = 0; ii < imagesToLoad; ++ii) {
+        var image = loadImage("resources/nv" + urls[ii] + ".bmp", onImageLoad);
+        cubeFaces.push(image);
+    }
+
+}
+
+function configureCubeMapImage() {
+    cubeMap = gl.createTexture();
+
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    /*
+    let posX = new Image();
+    posX.crossOrigin = "";
+    posX.src = "resources/nvposx.bmp";
+    posX.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posX);
+    var posY = new Image();
+    posY.crossOrigin = "";
+    posY.src = "resources/nvposy.bmp";
+    posY.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posY);
+    };
+    var posZ = new Image();
+    posZ.crossOrigin = "";
+    posZ.src = "resources/nvposz.bmp";
+    posZ.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posZ);
+    };
+    var negX = new Image();
+    negX.crossOrigin = "";
+    negX.src = "resources/nvnegx.bmp";
+    negX.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negX);
+    };
+    var negY = new Image();
+    negY.crossOrigin = "";
+    negY.src = "resources/nvnegy.bmp";
+    negY.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negY);
+    };
+    var negZ = new Image();
+    negZ.crossOrigin = "";
+    negZ.src = "resources/nvnegz.bmp";
+    negZ.onload = function () {
+        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negZ);
+    };*/
+
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[0]);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[1]);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[2]);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[3]);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[4]);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[5]);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+
+    gl.uniform1i(cubemapLoc, 3);  // texture unit 3
+}
 
 // newellNormal()
 // takes in one of my triangles (three point polygon) and calculates the normal for it
