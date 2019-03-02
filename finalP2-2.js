@@ -1,13 +1,14 @@
 /*
 * Ben Newmark
 * CS 4731
-* Final Project Part 1
+* Final Project Part 2
 *
 * EXTRA CREDIT BITS:
-* I implemented a small little thing for testing that might work for extra credit - you can slow the speed of everything's
-* rotation using 'v', and speed it up with 'b'. Even if it's not worth extra credit, then it's still probably helpful to know
-* for testing and grading.
-*
+* I implemented a small GUI underneath the canvas that keeps track of the variables that can be toggled:
+* lighting, shadows, background textures, reflections, and refractions
+* The status (on/off) will also change color to green and red respectively to be easier to read
+* the keybinds are included underneath each toggle for ease of access
+* The animation can also be paused or unpaused with "T", and the rotation speed can be slowed down with "v" or sped up with "b"
 * */
 
 var canvas;
@@ -27,9 +28,6 @@ var bottom = -3.0;
 
 let distance = 8;
 
-//mess around with those, eye coordinates
-//after viewer is at 0,0,0
-//could put it right behind viewer
 var curOtPos = vec3(2.5, -3.5, -distance * 2);
 var lightPosition = vec4(2.5, -0.5, -distance, 1.0);
 var lightAmbient = vec4(0.3, 0.3, 0.3, 1.0);
@@ -81,7 +79,7 @@ var texCoord = [
 var vTexCoord;
 var tBuffer;
 
-let depthMax = 2;
+let depthMax = 3;
 
 let shadowsOn = 1;
 let texturebackOn = 1;
@@ -99,7 +97,6 @@ var magenta = new Uint8Array([255, 0, 255, 255]);
 var yellow = new Uint8Array([255, 255, 0, 255]);
 let images = [];
 
-let refraDegree = 0.54;
 let light;
 
 //on loadup, do all of the one-time setups: gathering variable locations, one-time calculations for global variables, etc
@@ -147,6 +144,12 @@ window.onload = function init() {
         "angle"), sAngle);
     gl.uniform1f(gl.getUniformLocation(program,
         "isBackground"), 1.0);
+    gl.uniform1f(gl.getUniformLocation(program,
+        "haveReflections"), reflectionsOn);
+    gl.uniform1f(gl.getUniformLocation(program,
+        "haveRefraction"), refractionsOn);
+    gl.uniform1f(gl.getUniformLocation(program,
+        "enabled"), 1.0);
 
 
     var vPosition = gl.getAttribLocation(program, "vPosition");
@@ -188,29 +191,29 @@ window.onload = function init() {
     gl.enableVertexAttribArray(vTexCoord);
 
 
-    gl.uniform1f(gl.getUniformLocation(program,
-        "reflects"), reflectionsOn);
-
-
+    //set up light array for shadow use later
     light = vec3(-lightPosition[0], lightPosition[1], lightPosition[2]);
     m = mat4();
-    // m[3][3] = 0;
     m[3][2] = -1 / lightPosition[2];
     fColor = gl.getUniformLocation(program, "fColor");
 
 
+    //load the stone/grass textures, move to texturesSetup
     loadImages([
         "resources/stones.bmp",
         "resources/grass.bmp",
     ], texturesSetup);
 
 };
-// lookup the sampler locations.
+
+
 var wallTextLoc;
 var floorTextLoc;
 var cubemapLoc;
 var textures = [];
 
+//set up the grass and stone textures as well as the cubemap
+//when done, call render
 function texturesSetup() {
     // create 2 textures
     textures = [];
@@ -255,9 +258,10 @@ let mvMatrix;
 let mode = 'g';
 let rate = 0.01;
 let tRate = 1;
-let paused = 1;
+let paused = 0;
 
 // render: ran once per animation frame, sets up the view matrix before calling drawObjects() to summon all the items
+// and drawBackground() to draw the walls/floors
 // also handles keyboard commands
 function render() {
 
@@ -284,95 +288,21 @@ function render() {
     gl.uniformMatrix4fv(projectionMatrixLoc, false, flatten(pMatrix));
 
 
+    //if texturemapping is enabled, then use them. Otherwise, draw them as usual (but with no shadows/reflection/refraction
     if (texturebackOn)
         gl.enableVertexAttribArray(vTexCoord);
-    //draw walls and floor using texture stuff
     gl.uniform1f(gl.getUniformLocation(program, "isBackground"), 1.0);
     drawBackground();
 
+
+    //draw all the objects, possibly with cubemapped reflection and/or refraction
     gl.disableVertexAttribArray(vTexCoord);
-    //draw all the objects, possibly cubemapped
     gl.uniform1f(gl.getUniformLocation(program, "isBackground"), 0.0);
     drawObjects();
 
     theta += tRate;
 
 
-    window.onkeypress = function (event) {
-        var key = event.key;
-        let labels = document.getElementById("toggleTable").rows[0].cells;
-        switch (key) {
-            case 'p': //Increase spotlight cut off angle (increase cone angle)
-                if ((sAngle + rate) <= 1.0) {
-                    sAngle += rate;
-                    console.log("sAngle: " + sAngle);
-                }
-                break;
-            case 'P': // Decrease spotlight cut off angle (decrease cone angle)
-            case 'i':
-                if (sAngle >= rate) {
-                    sAngle -= rate;
-                    console.log("sAngle: " + sAngle);
-                }
-                break;
-            case 'm': // The scene is shaded using Gouraud lighting (smooth shading)
-                mode = 'g';
-                labels[0].innerHTML = "Lighting: <span style=\"color: dodgerblue; \">Gouraud</span>";
-                break;
-            case 'M': // The scene is shaded using flat shading
-            case 'n':
-                mode = 'f';
-                labels[0].innerHTML = "Lighting: <span style=\"color: saddlebrown; \">Flat</span>";
-                break;
-            case 'b':
-                tRate += 0.1;
-                break;
-            case 'v':
-                if (tRate >= 0.1)
-                    tRate -= 0.1;
-                break;
-            case 'A':
-                shadowsOn = Math.abs(shadowsOn - 1);
-                //console.log("Shadows toggled to " + shadowsOn);
-                if (shadowsOn === 0)
-                    labels[1].innerHTML = "Shadows: <span style=\"color: red; \">Off</span>";
-                else
-                    labels[1].innerHTML = "Shadows: <span style=\"color: green; \">On";
-
-                break;
-            case 'B':
-                texturebackOn = Math.abs(texturebackOn - 1);
-                //console.log("background textures toggled to " + texturebackOn);
-                if (texturebackOn === 0)
-                    labels[2].innerHTML = "Background textures: <span style=\"color: red; \">Off</span>";
-                else
-                    labels[2].innerHTML = "Background textures: <span style=\"color: green; \">On</span>";
-                break;
-            case 'C':
-                reflectionsOn = Math.abs(reflectionsOn - 1.0);
-                //console.log("reflections toggled to " + reflectionsOn);
-                if (reflectionsOn === 0)
-                    labels[3].innerHTML = "Reflections: <span style=\"color: red; \">Off</span>";
-                else
-                    labels[3].innerHTML = "Reflections: <span style=\"color: green; \">On</span>";
-                break;
-            case 'D':
-                refractionsOn = Math.abs(refractionsOn - 1);
-                //console.log("refraction toggled to " + refractionsOn);
-                if (refractionsOn === 0)
-                    labels[4].innerHTML = "Refraction: <span style=\"color: red; \">Off</span>";
-                else
-                    labels[4].innerHTML = "Refraction: <span style=\"color: green; \">On</span>";
-                break;
-            case 'T':
-                paused = Math.abs(paused - 1);
-                if (paused === 0)
-                    requestAnimationFrame(render);
-                break;
-        }
-    };
-
-    delayInMilliseconds = 0;
     if (paused === 0) {
         setTimeout(function () {
             requestAnimationFrame(render);
@@ -380,10 +310,107 @@ function render() {
     }
 }
 
+
+//all the keybinds: handles all commands plus updating the GUI with current states
+window.onkeypress = function (event) {
+    var key = event.key;
+    let labels = document.getElementById("toggleTable").rows[0].cells;
+    let inc = 0.1;
+    switch (key) {
+        case 'p': //Increase spotlight cut off angle (increase cone angle)
+            if ((sAngle + rate) <= 1.0) {
+                sAngle += rate;
+                console.log("sAngle: " + sAngle);
+            }
+            break;
+        case 'P': // Decrease spotlight cut off angle (decrease cone angle)
+        case 'i':
+            if (sAngle >= rate) {
+                sAngle -= rate;
+                console.log("sAngle: " + sAngle);
+            }
+            break;
+        case 'm': // The scene is shaded using Gouraud lighting (smooth shading)
+            mode = 'g';
+            labels[0].innerHTML = "Lighting: <span style=\"color: dodgerblue; \">Gouraud</span>";
+            break;
+        case 'M': // The scene is shaded using flat shading
+        case 'n':
+            mode = 'f';
+            labels[0].innerHTML = "Lighting: <span style=\"color: saddlebrown; \">Flat</span>";
+            break;
+        case 'b':
+            tRate += inc;
+            labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span>";
+            if (paused) {
+                labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span> " +
+                    "<span style=\"color: red; \">(PAUSED)</span>";
+            }
+            break;
+        case 'v':
+            if (tRate >= inc)
+                tRate -= inc;
+            labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span>";
+            if (paused) {
+                labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span> " +
+                    "<span style=\"color: red; \">(PAUSED)</span>";
+            }
+            break;
+        case 'A':
+            shadowsOn = Math.abs(shadowsOn - 1);
+            //console.log("Shadows toggled to " + shadowsOn);
+            if (shadowsOn === 0)
+                labels[1].innerHTML = "Shadows: <span style=\"color: red; \">Off</span>";
+            else
+                labels[1].innerHTML = "Shadows: <span style=\"color: green; \">On";
+
+            break;
+        case 'B':
+            texturebackOn = Math.abs(texturebackOn - 1);
+            //console.log("background textures toggled to " + texturebackOn);
+            if (texturebackOn === 0)
+                labels[2].innerHTML = "Background textures: <span style=\"color: red; \">Off</span>";
+            else
+                labels[2].innerHTML = "Background textures: <span style=\"color: green; \">On</span>";
+            break;
+        case 'C':
+            reflectionsOn = Math.abs(reflectionsOn - 1.0);
+            gl.uniform1f(gl.getUniformLocation(program,
+                "haveReflections"), reflectionsOn);
+            //console.log("reflections toggled to " + reflectionsOn);
+            if (reflectionsOn === 0)
+                labels[3].innerHTML = "Reflections: <span style=\"color: red; \">Off</span>";
+            else
+                labels[3].innerHTML = "Reflections: <span style=\"color: green; \">On</span>";
+            break;
+        case 'D':
+            refractionsOn = Math.abs(refractionsOn - 1);
+            gl.uniform1f(gl.getUniformLocation(program,
+                "haveRefraction"), refractionsOn);
+            //console.log("refraction toggled to " + refractionsOn);
+            if (refractionsOn === 0)
+                labels[4].innerHTML = "Refraction: <span style=\"color: red; \">Off</span>";
+            else
+                labels[4].innerHTML = "Refraction: <span style=\"color: green; \">On</span>";
+            break;
+        case 'T':
+            paused = Math.abs(paused - 1);
+            if (paused === 0) {
+                labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span>";
+                requestAnimationFrame(render);
+            } else
+                labels[5].innerHTML = "Rotation speed (theta): <span style=\"color: green; \">" + tRate.toPrecision(3) + "</span> " +
+                    "<span style=\"color: red; \">(PAUSED)</span>";
+            break;
+    }
+};
+
+
 //set modifiers for theta
 let spot;
 let mod = [0, 0, 2, 8];
 
+//create and draw the walls and floors (through calling draw())
 function drawBackground() {
     let walls = quad(0, 1, 2, 3); //wall
     let floor = quad(0, 4, 1, 5); //floor
@@ -567,6 +594,8 @@ function makeChildren(depth, type) {
 
 // draw: takes objectArr, which is a 2d array holding vertices ([0]) and normals ([1]), color, which is a color, and
 // count, which is the number of vertices. Using them, it draws an object
+// if it's a background (wall/floor), then it's marked as such so that it doesn't reflect/refract/cast a shadow
+// if it should cast a shadow, special second part is ran after main draw
 function draw(objectArr, color, count, image = 'n') {
     var object = objectArr[0];
     var objNorm = objectArr[1];
@@ -602,6 +631,7 @@ function draw(objectArr, color, count, image = 'n') {
     gl.vertexAttribPointer(vColor, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vColor);
 
+
     var vBuffer2 = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer2);
     if (mode === 'f')
@@ -616,8 +646,9 @@ function draw(objectArr, color, count, image = 'n') {
     gl.uniform1f(gl.getUniformLocation(program,
         "textNum"), 0.5);
     gl.uniform1f(gl.getUniformLocation(program,
-        "reflects"), Math.max(reflectionsOn, refractionsOn));
+        "isShadow"), 0.0);
 
+    //wall/floor texturing
     if ((image !== 'n') && (texturebackOn === 1)) {
         // set which texture units to render with.
         gl.uniform1i(wallTextLoc, 0);  // texture unit 0
@@ -636,49 +667,35 @@ function draw(objectArr, color, count, image = 'n') {
             gl.uniform1f(gl.getUniformLocation(program,
                 "textNum"), 1.0);
     }
+    //draw the item!
     for (let i = 0; i < count; i += 3) {
         gl.drawArrays(gl.TRIANGLES, i, 3);
     }
 
+    //shadow calculation!
+    //never could figure out z due to having it in a corner, calculation would be really irritating and
+    //nothing's worked yet, so just using a janky calculation to approximate it
     if ((count > 6) && (shadowsOn === 1)) {
+        gl.uniform1f(gl.getUniformLocation(program,
+            "isShadow"), 1.0);
+
         let toOrigMat = translate(light[0], light[1], light[2]);
         let returnMat = translate(-light[0], -light[1], -light[2]);
         let M = mult(toOrigMat, m);
         M = mult(M, returnMat);
         let T = mat4(1);
-        T[2][3] = -8;
-        //TODO figure out how to calculate T[2][3] - should be distance from z = 0 to the back wall (need to figure out back wall!)
+        let z = Math.max(Math.abs(mvMatrix[0][3]), 5);
+        T[2][3] = -z;
 
         let baseShadow = mult(M, mvMatrix);
         let trueShadow = mult(T, baseShadow);
 
-        /*      //all the testing messages for shadows
-                console.log("to origin:");
-                console.log(toOrigMat);
-                console.log("m:");
-                console.log(m);
-                console.log("return:");
-                console.log(returnMat);
-                console.log("M:");
-                console.log(M);
-                console.log("modelview:");
-                console.log(modelViewMatrix);
-                console.log("M * A:");
-                console.log(baseShadow);
-                console.log("T * M * A:");
-                console.log(trueShadow);
-        */
-
         gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(trueShadow));
-
         gl.disableVertexAttribArray(vColor);
-
         gl.uniform4fv(fColor, flatten(vec4(0.0, 0.0, 0.0, 1.0)));
-
         for (let j = 0; j < count; j += 3) {
             gl.drawArrays(gl.TRIANGLES, j, 3);
         }
-
     }
 }
 
@@ -864,6 +881,7 @@ function triangle(a, b, c) {
 }
 
 
+//loads up an image
 function loadImage(url, callback) {
     var image = new Image();
     image.src = url;
@@ -871,6 +889,7 @@ function loadImage(url, callback) {
     return image;
 }
 
+//loads all the images, runs callback when done
 function loadImages(urls, callback) {
     images = [];
     var imagesToLoad = urls.length;
@@ -893,6 +912,7 @@ function loadImages(urls, callback) {
 
 var cubeMap;
 
+//sets up a placeholder cubemap while loadCubeMapImages() is starting up
 function configureCubeMap() {
     cubeMap = gl.createTexture();
 
@@ -918,6 +938,8 @@ function configureCubeMap() {
 
 let cubeFaces = [];
 
+//creates loads up all the images for the actual cubemap
+//when done making the last one, runs configureCubeMapImage()
 function loadCubeMapImages() {
     cubeFaces = [];
     let urls = ["posx", "posy", "posz", "negx", "negy", "negz"];
@@ -940,6 +962,7 @@ function loadCubeMapImages() {
 
 }
 
+// uses the cubeFaces array we made in loadCubeMapImages() to set up the real cubemap and sets us up to use it
 function configureCubeMapImage() {
     cubeMap = gl.createTexture();
 
@@ -948,43 +971,6 @@ function configureCubeMapImage() {
 
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    /*
-    let posX = new Image();
-    posX.crossOrigin = "";
-    posX.src = "resources/nvposx.bmp";
-    posX.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posX);
-    var posY = new Image();
-    posY.crossOrigin = "";
-    posY.src = "resources/nvposy.bmp";
-    posY.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posY);
-    };
-    var posZ = new Image();
-    posZ.crossOrigin = "";
-    posZ.src = "resources/nvposz.bmp";
-    posZ.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posZ);
-    };
-    var negX = new Image();
-    negX.crossOrigin = "";
-    negX.src = "resources/nvnegx.bmp";
-    negX.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negX);
-    };
-    var negY = new Image();
-    negY.crossOrigin = "";
-    negY.src = "resources/nvnegy.bmp";
-    negY.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negY);
-    };
-    var negZ = new Image();
-    negZ.crossOrigin = "";
-    negZ.src = "resources/nvnegz.bmp";
-    negZ.onload = function () {
-        gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, negZ);
-    };*/
 
     gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[0]);
     gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cubeFaces[1]);
